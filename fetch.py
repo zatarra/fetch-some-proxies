@@ -18,7 +18,7 @@ import threading
 import time
 import urllib2
 
-VERSION = "2.5"
+VERSION = "2.5.1"
 BANNER = """
 +-++-++-++-++-++-++-++-++-++-++-++-++-++-++-++-++-++-+
 |f||e||t||c||h||-||s||o||m||e||-||p||r||o||x||i||e||s| <- v%s
@@ -33,6 +33,7 @@ ROTATION_CHARS = ('/', '-', '\\', '|')
 TIMEOUT = 10
 THREADS = 10
 USER_AGENT = "curl/7.{curl_minor}.{curl_revision} (x86_64-pc-linux-gnu) libcurl/7.{curl_minor}.{curl_revision} OpenSSL/0.9.8{openssl_revision} zlib/1.2.{zlib_revision}".format(curl_minor=random.randint(8, 22), curl_revision=random.randint(1, 9), openssl_revision=random.choice(string.lowercase), zlib_revision=random.randint(2, 6))
+PROXY_LIST = []
 
 if not subprocess.mswindows:
     BANNER = re.sub(r"\|(\w)\|", lambda _: "|\033[01;41m%s\033[00;49m|" % _.group(1), BANNER)
@@ -54,6 +55,7 @@ def retrieve(url, data=None, headers={"User-agent": USER_AGENT}, timeout=TIMEOUT
     return retval or ""
 
 def worker(queue, handle=None):
+    global PROXY_LIST
     try:
         while True:
             proxy = queue.get_nowait()
@@ -80,6 +82,7 @@ def worker(queue, handle=None):
                         handle.flush()
                     sys.stdout.write("\r%s%s # latency: %.2f sec; country: %s; anonymity: %s (%s)\n" % (candidate, " " * (32 - len(candidate)), latency, ' '.join(_.capitalize() for _ in (proxy["country"].lower() or '-').split(' ')), proxy["anonymity"].lower() or '-', ANONIMITY_LEVELS.get(proxy["anonymity"].lower(), '-')))
                     sys.stdout.flush()
+                    PROXY_LIST.append({"address": candidate, "latency": latency})
     except Queue.Empty:
         pass
 
@@ -99,12 +102,14 @@ def run():
         exit("[!] something went wrong during the proxy list retrieval/parsing. Please check your network settings and try again")
     random.shuffle(proxies)
 
-    if options.country or options.anonymity or options.type:
+    if options.country or options.anonymity or options.type or options.port:
         _ = []
         for proxy in proxies:
             if options.country and not re.search(options.country, proxy["country"], re.I):
                 continue
             if options.anonymity and not re.search(options.anonymity, "%s (%s)" % (proxy["anonymity"], ANONIMITY_LEVELS.get(proxy["anonymity"].lower(), "")), re.I):
+                continue
+            if options.port and not re.search(options.port, str(proxy["PORT"]), re.I):
                 continue
             if options.type and not re.search(options.type, proxy["type"], re.I):
                 continue
@@ -150,6 +155,10 @@ def run():
     finally:
         sys.stdout.flush()
         sys.stderr.flush()
+        if len(PROXY_LIST) > 0:
+          sys.stdout.write("List of working proxies sorted by latency:\n")
+          for p in sorted(PROXY_LIST, key=lambda k: k['latency']): sys.stdout.write( "Address: {0:30} {1} seconds.\n".format(p["address"] , "%.2f" % p["latency"])) 
+
         handle.flush()
         handle.close()
 
@@ -163,6 +172,7 @@ def main():
     parser.add_option("--max-latency", dest="maxLatency", type=float, help="Maximum (tolerable) latency in seconds (default %d)" % TIMEOUT)
     parser.add_option("--threads", dest="threads", type=int, help="Number of scanning threads (default %d)" % THREADS)
     parser.add_option("--type", dest="type", help="Regex for filtering proxy type (e.g. \"http\")")
+    parser.add_option("--port", dest="port", help="Regex for filtering accepted ports (e.g. \"8080|3128\")")
 
     def _(self, *args):
         retVal = parser.formatter._format_option_strings(*args)
